@@ -1,0 +1,83 @@
+name: Check Prometheus and Alertmanager Versions
+
+on:
+  # schedule:
+     # Run every day at midnight UTC
+    # - cron: "0 0 * * *"
+  workflow_dispatch: # Allows manual triggering
+
+
+jobs:
+  check_versions:
+    runs-on: uhg-runner
+
+    steps:
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq mailutils msmtp
+        
+
+      - name: Get latest Prometheus version
+        env: 
+         MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: | 
+          PROMETHEUS_API="https://api.github.com/repos/prometheus/prometheus/releases/latest"
+          PROMETHEUS_VERSION=$(curl -s -H "Authorization: Bearer $MY_GITHUB_TOKEN" $PROMETHEUS_API | jq -r '.tag_name')
+          echo "PROMETHEUS_VERSION=$PROMETHEUS_VERSION" >> $GITHUB_ENV
+
+      - name: Get latest Alertmanager version
+        env: 
+         MY_GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+        run: |
+          ALERTMANAGER_API="https://api.github.com/repos/prometheus/alertmanager/releases/latest"
+          ALERTMANAGER_VERSION=$(curl -s -H "Authorization: Bearer $MY_GITHUB_TOKEN" $ALERTMANAGER_API | jq -r '.tag_name')
+          echo "ALERTMANAGER_VERSION=$ALERTMANAGER_VERSION" >> $GITHUB_ENV
+
+      - name: Compare versions and send notification if needed
+        env:
+          PROMETHEUS_VERSION_OLD: "v3.0.0"
+          ALERTMANAGER_VERSION_OLD: "v0.27.0"
+          SMTP_SERVER: "mailo2.uhc.com"
+          SMTP_PORT: 25
+          TO_EMAIL: "email ID"
+        run: |
+          NEW_PROMETHEUS=false
+          NEW_ALERTMANAGER=false
+      
+          
+          # Check if Prometheus version is new
+          if [ "$PROMETHEUS_VERSION" != "$PROMETHEUS_VERSION_OLD" ]; then
+            echo "New Prometheus version detected: $PROMETHEUS_VERSION"
+            NEW_PROMETHEUS=true
+          fi
+          
+          # Check if Alertmanager version is new
+          if [ "$ALERTMANAGER_VERSION" != "$ALERTMANAGER_VERSION_OLD" ]; then
+            echo "New Alertmanager version detected: $ALERTMANAGER_VERSION"
+            NEW_ALERTMANAGER=true
+          fi
+          
+          # Send notification email if any version is updated
+          if [ "$NEW_PROMETHEUS" = "true" ] || [ "$NEW_ALERTMANAGER" = "true" ]; then
+            BODY="<div style='background-color: #dceadd; padding: 10px;'>"
+
+          
+            if [ "$NEW_PROMETHEUS" = "true" ]; then
+              BODY+="<br>New Prometheus Version: $PROMETHEUS_VERSION\n"
+            fi
+          
+            if [ "$NEW_ALERTMANAGER" = "true" ]; then
+              BODY+="<br>New Alertmanager Version: $ALERTMANAGER_VERSION\n"
+            fi
+            
+          # Add extra notes and footer
+            BODY+="<br>===============================================================<br>"
+            BODY+="<br>** This automated email notification is recieved when there is a new Prometheus and/or Alert manager version available ** <br>"
+            BODY+="<br>Best regards,<br> Team"
+            
+            PREDEFINED_EMAIL="Prometheus_Alertmanager_VersionCheck@optum.com"
+            if [ -n "$BODY" ]; then
+              echo -e "Subject: New Prometheus/Alertmanager Release\nFrom: $PREDEFINED_EMAIL\nTo: $TO_EMAIL\nContent-Type: text/html\n\n$BODY" | msmtp --host=$SMTP_SERVER --port=$SMTP_PORT --from=$PREDEFINED_EMAIL $TO_EMAIL
+            fi
+          fi
